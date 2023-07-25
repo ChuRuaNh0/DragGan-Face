@@ -78,7 +78,7 @@ def init_images(global_state):
         valid_checkpoints_dict[state['pretrained_weight']],  # pkl
         state['params']['seed'],  # w0_seed,
         # None,  # w_load
-        torch.load("/Face_View/DragGAN_CRN/0.pt"),
+        torch.load("/Face_View/DragGAN_CRN/PTI/embeddings/image/PTI/latent_vector/0.pt"),
         state['params']['latent_space'] == 'w+',  # w_plus
         'const',
         state['params']['trunc_psi'],  # trunc_psi,
