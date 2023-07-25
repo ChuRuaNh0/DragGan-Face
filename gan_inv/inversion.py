@@ -14,7 +14,7 @@ from PIL import Image
 from tqdm import tqdm
 import dataclasses
 import dnnlib
-from lpips import util
+from .lpips import util
 import imageio
 
 
@@ -49,10 +49,10 @@ def make_image(tensor):
 class InverseConfig:
     lr_warmup = 0.05
     lr_decay = 0.25
-    lr = 0.1
+    lr = 0.001
     noise = 0.05
     noise_decay = 0.75
-    step = 500
+    # step = 1000
     noise_regularize = 1e5
     mse = 0.1
 
@@ -65,11 +65,13 @@ def inverse_image(
     image_size=256,
     w_plus = False,
     config=InverseConfig(),
-    device='cuda:0'
+    device='cuda:0',
+    step = 1000,
+    n_mean_latent = 10000
 ):
     args = config
 
-    n_mean_latent = 10000
+    # n_mean_latent = 10000
 
     resize = min(image_size, 256)
 
@@ -109,9 +111,9 @@ def inverse_image(
         #label = torch.zeros([n_mean_latent,g_ema.c_dim],device = device)
         # print("[infor] noise sample: ", noise_sample.shape)
         w_samples = g_ema.mapping(noise_sample, None)
-        # print("[infor] w sample: ", w_samples.shape)
+        print("[infor] w sample: ", w_samples.shape)
         w_samples = w_samples[:, :1, :]
-        # print("[infor] w  : ", w_samples.shape)
+        print("[infor] w  : ", w_samples.shape)
         w_avg = w_samples.mean(0)
         w_std = ((w_samples - w_avg).pow(2).sum() / n_mean_latent) ** 0.5
 
@@ -129,10 +131,12 @@ def inverse_image(
     w_opt = w_avg.detach().clone()
     print("[Info] w opt: ", w_opt.shape)
 
+    print(w_opt.shape)
     if w_plus:
         w_opt = w_opt.repeat(1,g_ema.mapping.num_ws, 1)
-        
+    print(w_opt.shape)
     w_opt.requires_grad = True
+    # exit(1)
     #if args.w_plus:
         #latent_in = latent_in.unsqueeze(1).repeat(1, g_ema.n_latent, 1)
 
@@ -140,12 +144,12 @@ def inverse_image(
 
     optimizer = optim.Adam([w_opt] + list(noises.values()), lr=args.lr)
 
-    pbar = tqdm(range(args.step))
+    pbar = tqdm(range(step))
     latent_path = []
 
     for i in pbar:
 
-        t = i / args.step
+        t = i / step
         lr = get_lr(t, args.lr)
         optimizer.param_groups[0]["lr"] = lr
         noise_strength = w_std * args.noise * max(0, 1 - t / args.noise_decay) ** 2
@@ -245,7 +249,7 @@ def toogle_grad(model, flag=True):
 
 
 class PTI:
-    def __init__(self,  G, percept, l2_lambda = 1, max_pti_step = 200, pti_lr = 3e-4 ):
+    def __init__(self,  G, percept, l2_lambda = 1, max_pti_step = 400, pti_lr = 3e-4 ):
         self.g_ema = G
         self.l2_lambda = l2_lambda
         self.max_pti_step = max_pti_step
@@ -259,7 +263,7 @@ class PTI:
         loss = p_loss + self.l2_lambda * mse_loss
         return loss
 
-    def train(self, img, w_plus=False):
+    def train(self, img, w_plus=False, step=1000):
         # Preprocessing image
 
         if torch.is_tensor(img) == False:
@@ -285,7 +289,14 @@ class PTI:
             real_img = transform(img).to('cuda').unsqueeze(0)
         # ================================================================================
 
-        inversed_result = inverse_image(self.g_ema, img, self.percept, self.g_ema.img_resolution, w_plus)
+        inversed_result = inverse_image(self.g_ema, img, self.percept, self.g_ema.img_resolution, w_plus, step=step)
+
+        print(inversed_result.keys())
+        print(inversed_result["latent"].shape)
+        print(inversed_result["sample"].shape)
+        print(inversed_result["real"].shape)
+
+        # exit(1)
 
         w_pivot = inversed_result['latent']
 
@@ -293,7 +304,7 @@ class PTI:
             ws = w_pivot
         else:
             ws = w_pivot.repeat([1, self.g_ema.mapping.num_ws, 1])
-
+        print(len(ws))
         toogle_grad(self.g_ema,True)
         optimizer = torch.optim.Adam(self.g_ema.parameters(), lr=self.pti_lr)
         print('start PTI')
@@ -376,15 +387,18 @@ if __name__ == "__main__":
     )
     image = Image.open('/Face_View/DragGAN_CRN/Screenshot 2023-07-21...jpg')
     G = state['renderer'].G
+    print(state['renderer'].__dict__)
+    exit(1)
     percept = util.PerceptualLoss(
         model="net-lin", net="vgg", use_gpu=True
     )
+    print(percept)
+    # exit(1)
+    # result = inverse_image(G, image, percept=percept, image_size=G.img_resolution)
 
-    result = inverse_image(G, image, percept=percept, image_size=G.img_resolution)
 
-
-    pti = PTI(G,percept)
-    result = pti.train(image,True)
+    pti = PTI(G, percept, max_pti_step=10)
+    result = pti.train(img = image, w_plus=True, step=10)
     imageio.imsave('test.png', make_image(result[0])[0])
 
 

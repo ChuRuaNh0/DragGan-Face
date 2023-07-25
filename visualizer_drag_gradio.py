@@ -77,7 +77,8 @@ def init_images(global_state):
         state['generator_params'],  # res
         valid_checkpoints_dict[state['pretrained_weight']],  # pkl
         state['params']['seed'],  # w0_seed,
-        None,  # w_load
+        # None,  # w_load
+        torch.load("/Face_View/DragGAN_CRN/0.pt"),
         state['params']['latent_space'] == 'w+',  # w_plus
         'const',
         state['params']['trunc_psi'],  # trunc_psi,
@@ -162,7 +163,7 @@ print(os.listdir(cache_dir))
 print('Valid checkpoint file:')
 print(valid_checkpoints_dict)
 
-init_pkl = 'stylegan2_lions_512_pytorch'
+init_pkl = 'stylegan2_custom_512_pytorch'
 
 with gr.Blocks() as app:
         # renderer = Renderer()
@@ -602,9 +603,9 @@ with gr.Blocks() as app:
                 # reverse points order
                 p_to_opt = reverse_point_pairs(p_in_pixels)
                 t_to_opt = reverse_point_pairs(t_in_pixels)
-                #print('Running with:')
-                #print(f'    Source: {p_in_pixels}')
-                #print(f'    Target: {t_in_pixels}')
+                print('Running with:')
+                print(f'    Source: {p_in_pixels}')
+                print(f'    Target: {t_in_pixels}')
                 step_idx = 0
                 while True:
                     if global_state["temporal_params"]["stop"]:
@@ -648,7 +649,7 @@ with gr.Blocks() as app:
                             ]
                             start_temp = global_state["points"][key_point][
                                 "start_temp"]
-                            #print(f'    {start_temp}')
+                            print(f'    {start_temp}')
 
                         image_result = global_state['generator_params']['image']
                         image_draw = update_image_draw(
@@ -774,7 +775,7 @@ with gr.Blocks() as app:
         )
         
 
-        def on_click_inverse_custom_image(custom_image,global_state):
+        def on_click_inverse_custom_image(custom_image, global_state):
             print('inverse GAN')
 
             if isinstance(global_state, gr.State):
@@ -801,9 +802,9 @@ with gr.Blocks() as app:
 
             image = Image.open(custom_image.name)
 
-            pti = PTI(global_state['renderer'].G, percept)
+            pti = PTI(global_state['renderer'].G, percept, max_pti_step=1000)
 
-            inversed_img, w_pivot = pti.train(image, state['params']['latent_space'] == 'w+')
+            inversed_img, w_pivot = pti.train(image, state['params']['latent_space'] == 'w+', step=400)
             # print(inversed_img)
             # print(w_pivot)
 

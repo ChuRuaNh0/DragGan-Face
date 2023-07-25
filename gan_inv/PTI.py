@@ -10,7 +10,7 @@ def toogle_grad(model, flag=True):
 
 
 class PTI:
-    def __init__(self, G, l2_lambda = 1, max_pti_step = 200, pti_lr = 3e-4 ):
+    def __init__(self, G, l2_lambda = 1, max_pti_step = 400, pti_lr = 3e-4 ):
         self.g_ema = G
         self.l2_lambda = l2_lambda
         self.max_pti_step = max_pti_step
