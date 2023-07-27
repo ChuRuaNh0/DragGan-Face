@@ -220,6 +220,7 @@ class Renderer:
         # Dig up network details.
         self.pkl = pkl
         G = self.get_network(pkl, 'G_ema')
+        # G =
         self.G = G
         res.img_resolution = G.img_resolution
         res.num_ws = G.num_ws
@@ -306,19 +307,31 @@ class Renderer:
     ):
         G = self.G
         ws = self.w
+        print("[Ws - w samples] ; ", ws.shape) 
+        # exit(1)
         if ws.dim() == 2:
             ws = ws.unsqueeze(1).repeat(1,6,1)
+        # print(ws.shape)
         ws = torch.cat([ws[:,:6,:], self.w0[:,6:,:]], dim=1)
+        # self.w0 = ws.detach().clone()
+        # ws = torch.cat([ws[:,:,:], self.w0[:,:,:]], dim=1)
+
+        # print(ws.shape)
+        # exit(1)
         if hasattr(self, 'points'):
             if len(points) != len(self.points):
                 reset = True
         if reset:
             self.feat_refs = None
             self.points0_pt = None
+
         self.points = points
 
         # Run synthesis network.
         label = torch.zeros([1, G.c_dim], device=self._device)
+        # print(label)
+        # print(label.shape)
+        # exit(1)
         img, feat = G(ws, label, truncation_psi=trunc_psi, noise_mode=noise_mode, input_is_w=True, return_feature=True)
 
         h, w = G.img_resolution, G.img_resolution

@@ -562,6 +562,7 @@ class Generator(torch.nn.Module):
                 ws = ws.unsqueeze(1).repeat([1, self.mapping.num_ws, 1])
         else:
             ws = self.mapping(z, c, truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff, update_emas=update_emas)
+        # img = self.synthesis(ws, update_emas=update_emas, return_feature=return_feature, **synthesis_kwargs)
         img = self.synthesis(ws, update_emas=update_emas, return_feature=return_feature, **synthesis_kwargs)
         if return_feature:
             img, feature = img

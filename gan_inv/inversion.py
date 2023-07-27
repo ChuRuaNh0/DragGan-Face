@@ -16,6 +16,9 @@ import dataclasses
 import dnnlib
 from .lpips import util
 import imageio
+import pickle
+from training.networks_stylegan2 import Generator
+# import 
 
 
 
@@ -71,6 +74,8 @@ def inverse_image(
 ):
     args = config
 
+    # model_style = 
+
     # n_mean_latent = 10000
 
     resize = min(image_size, 256)
@@ -109,7 +114,7 @@ def inverse_image(
         #noise_sample = torch.randn(n_mean_latent, 512, device=device)
         noise_sample = torch.randn(n_mean_latent, g_ema.z_dim, device=device)
         #label = torch.zeros([n_mean_latent,g_ema.c_dim],device = device)
-        # print("[infor] noise sample: ", noise_sample.shape)
+        print("[infor] noise sample: ", noise_sample.shape)
         w_samples = g_ema.mapping(noise_sample, None)
         print("[infor] w sample: ", w_samples.shape)
         w_samples = w_samples[:, :1, :]
@@ -132,8 +137,10 @@ def inverse_image(
     print("[Info] w opt: ", w_opt.shape)
 
     print(w_opt.shape)
+
     if w_plus:
-        w_opt = w_opt.repeat(1,g_ema.mapping.num_ws, 1)
+        w_opt = w_opt.repeat(1, g_ema.mapping.num_ws, 1)
+
     print(w_opt.shape)
     w_opt.requires_grad = True
     # exit(1)
@@ -152,14 +159,17 @@ def inverse_image(
         t = i / step
         lr = get_lr(t, args.lr)
         optimizer.param_groups[0]["lr"] = lr
+        # AdiIn
         noise_strength = w_std * args.noise * max(0, 1 - t / args.noise_decay) ** 2
 
         w_noise = torch.randn_like(w_opt) * noise_strength
-
         if w_plus:
             ws = w_opt + w_noise
         else:
             ws = (w_opt + w_noise).repeat([1, g_ema.mapping.num_ws, 1])
+
+        # print(ws.shape)
+        # exit(1)
 
         img_gen = g_ema.synthesis(ws, noise_mode='const', force_fp32=True)
 
@@ -169,7 +179,6 @@ def inverse_image(
         #img_gen, F = g_ema.generate(latent, noise)
 
         # Downsample image to 256x256 if it's larger than that. VGG was built for 224x224 images.
-        
         if img_gen.shape[2] > 256:
             img_gen = F.interpolate(img_gen, size=(256, 256), mode='area')
 
@@ -187,6 +196,7 @@ def inverse_image(
                 if noise.shape[2] <= 8:
                     break
                 noise = F.avg_pool2d(noise, kernel_size=2)
+
         mse_loss = F.mse_loss(img_gen, imgs)
 
         loss = p_loss + args.noise_regularize * reg_loss + args.mse * mse_loss
@@ -200,20 +210,24 @@ def inverse_image(
             for buf in noises.values():
                 buf -= buf.mean()
                 buf *= buf.square().mean().rsqrt()
-
+        # print(((i + 1) % 100))
         if (i + 1) % 100 == 0:
+            # print("ok")
             latent_path.append(w_opt.detach().clone())
 
         pbar.set_description(
             (
-                f"perceptual: {p_loss.item():.4f}; noise regularize: {reg_loss:.4f};"
-                f" mse: {mse_loss.item():.4f}; lr: {lr:.4f}"
+                f"Perceptual Loss: {p_loss.item():.4f}; Noise regularize Loss: {reg_loss:.4f};"
+                f" Mse Loss: {mse_loss.item():.4f}; lr: {lr:.4f}"
             )
         )
-
-    #latent, noise = g_ema.prepare([latent_path[-1]], input_is_latent=True, noise=noises)
-    #img_gen, F = g_ema.generate(latent, noise)
-
+    print("[Info] shape of image gen/real_img: {}/{}".format(img_gen.shape, imgs.shape))
+    
+    # print(g_ema.__dict__)
+    # exit(1)
+    # latent, noise = g_ema.prepare([latent_path[-1]], input_is_latent=True, noise=noises)
+    # img_gen, _ = g_ema.generate(latent, noise)
+    # print(latent_path)
     if w_plus:
         ws = latent_path[-1]
     else:
@@ -222,18 +236,18 @@ def inverse_image(
     # print(ws.shape)
     # print(w_opt.shape)
     # exit(1)
-    import cv2
-    import numpy as np
+    # import cv2
+    # import numpy as np
 
     img_gen = g_ema.synthesis(ws, noise_mode='const')
-    rgb = np.squeeze(img_gen.cpu().detach())
-    rgb = np.transpose(rgb, (1, 2, 0))
+    # rgb = np.squeeze(img_gen.cpu().detach())
+    # rgb = np.transpose(rgb, (1, 2, 0))
 
-    # print(rgb.shape)
+    # # print(rgb.shape)
 
-    bgr = cv2.cvtColor(rgb.numpy()*255, cv2.COLOR_RGB2BGR)
+    # bgr = cv2.cvtColor(rgb.numpy()*255, cv2.COLOR_RGB2BGR)
 
-    cv2.imwrite("synthis.png", bgr)
+    # cv2.imwrite("synthis.png", bgr)
 
     result = {
         "latent": latent_path[-1],
@@ -246,6 +260,9 @@ def inverse_image(
 def toogle_grad(model, flag=True):
     for p in model.parameters():
         p.requires_grad = flag
+
+
+
 
 
 class PTI:
@@ -262,52 +279,23 @@ class PTI:
         p_loss = percept(generated_image, real_image).sum()
         loss = p_loss + self.l2_lambda * mse_loss
         return loss
-
-    def train(self, img, w_plus=False, step=1000):
-        # Preprocessing image
-
-        if torch.is_tensor(img) == False:
-            transform = transforms.Compose(
-                [
-                    transforms.Resize(self.g_ema.img_resolution, ),
-                    transforms.CenterCrop(self.g_ema.img_resolution),
-                    transforms.ToTensor(),
-                    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-                ]
-            )
-
-            real_img = transform(img).to('cuda').unsqueeze(0)
-
-        else:
-            img = transforms.functional.resize(img, self.g_ema.img_resolution)
-            transform = transforms.Compose(
-                [
-                    transforms.CenterCrop(self.g_ema.img_resolution),
-                    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-                ]
-            )
-            real_img = transform(img).to('cuda').unsqueeze(0)
-        # ================================================================================
-
-        inversed_result = inverse_image(self.g_ema, img, self.percept, self.g_ema.img_resolution, w_plus, step=step)
-
-        print(inversed_result.keys())
-        print(inversed_result["latent"].shape)
-        print(inversed_result["sample"].shape)
-        print(inversed_result["real"].shape)
-
-        # exit(1)
+    
+    def train_real_image(self, inversed_result, w_plus, real_img):
 
         w_pivot = inversed_result['latent']
-
+        # torch.save(w_pivot, path_latent)
         if w_plus:
             ws = w_pivot
         else:
             ws = w_pivot.repeat([1, self.g_ema.mapping.num_ws, 1])
-        print(len(ws))
-        toogle_grad(self.g_ema,True)
+
+        generated_image = self.g_ema.synthesis(ws, noise_mode='const')
+        
+        # print(len(ws))
+        # toogle_grad(self.g_ema,True)
+
         optimizer = torch.optim.Adam(self.g_ema.parameters(), lr=self.pti_lr)
-        print('start PTI')
+        # print('start PTI')
         pbar = tqdm(range(self.max_pti_step))
 
         for i in pbar:
@@ -328,8 +316,133 @@ class PTI:
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+
+        # with torch.no_grad():
+
+        #     generated_image = self.g_ema.synthesis(ws, noise_mode='const')
+        
+        return ws
+
+    def train(self, img, image_flip,  w_plus=False, step=1000, path_pt="custome_weight.pt", path_latent="latent.pt", path_pkl=None):
+
+        # Preprocessing image
+        if torch.is_tensor(img) == False:
+            transform = transforms.Compose(
+                [
+                    transforms.Resize(self.g_ema.img_resolution, ),
+                    transforms.CenterCrop(self.g_ema.img_resolution),
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+                ]
+            )
+
+            real_img = transform(img).to('cuda').unsqueeze(0)
+            real_image_flip = transform(image_flip).to('cuda').unsqueeze(0)
+
+        else:
+            img = transforms.functional.resize(img, self.g_ema.img_resolution)
+            image_flip = transforms.functional.resize(image_flip, self.g_ema.img_resolution)
+            transform = transforms.Compose(
+                [
+                    transforms.CenterCrop(self.g_ema.img_resolution),
+                    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+                ]
+            )
+
+            real_img = transform(img).to('cuda').unsqueeze(0)
+            real_image_flip = transform(image_flip).to('cuda').unsqueeze(0)
+        # ================================================================================
+
+        #################################################Image_ORI#############################################################
+
+        inversed_result_1 = inverse_image(self.g_ema, image=img, percept = self.percept, image_size=self.g_ema.img_resolution, w_plus=w_plus, step=step)
+
+        laten_1 = self.train_real_image(inversed_result=inversed_result_1, w_plus=w_plus, real_img=real_img)
+
+        with torch.no_grad():
+            generated_image_1 = self.g_ema.synthesis(laten_1, noise_mode='const')
+
+        #################################################Image_FLIP#############################################################
+        inversed_result_2 = inverse_image(self.g_ema, image=image_flip, percept = self.percept, image_size=self.g_ema.img_resolution, w_plus=w_plus, step=step)
+
+        laten_2 = self.train_real_image(inversed_result=inversed_result_2, w_plus=w_plus, real_img=real_image_flip)
+
+        with torch.no_grad():
+            generated_image_2 = self.g_ema.synthesis(laten_2, noise_mode='const')
+
+
+
+
+        ############################################################Image-CONCAT##################################################
+        ws = (laten_1 + laten_2) / 2
+
         with torch.no_grad():
             generated_image = self.g_ema.synthesis(ws, noise_mode='const')
+        
+        
+
+        
+        # print(generated_image)
+        # import cv2
+        # import numpy as np
+        # image_gen = np.squeeze(generated_image.detach().cpu().numpy())
+        # print(image_gen.shape)
+        # image_gen = cv2.cvtColor(np.transpose(image_gen, (1, 2, 0))*255, cv2.COLOR_RGB2BGR)
+        # print(image_gen.shape)
+
+        imageio.imsave('test_right.png', make_image(generated_image_1)[0])
+
+        imageio.imsave('test_left.png', make_image(generated_image_2)[0])
+
+        imageio.imsave('test_align.png', make_image(generated_image)[0])
+
+
+        # inversed_result_1 = {}
+        # inversed_result_1['latent'] = inversed_result_1["latent"] 
+        # inversed_result_1['sample'] = inversed_result_1["sample"] 
+        # inversed_result['latent'] = (inversed_result_1["latent"] + inversed_result_2["latent"]) / 2
+        # inversed_result['sample'] = (inversed_result_1["sample"] + inversed_result_2["sample"]) / 2
+        # print()
+        # inversed_result['latent'] = (inversed_result_1["latent"] + inversed_result_2["latent"]) / 2
+
+    #     {
+    #     "latent": latent_path[-1],
+    #     "sample": img_gen,
+    #     "real": imgs,
+    # }
+
+
+        # print(inversed_result.keys())
+        # print(inversed_result["latent"].shape)
+        # print(inversed_result["sample"].shape)
+        # print(inversed_result["real"].shape)
+
+        # exit(1)
+
+        
+
+        # torch.save(self.g_ema, f'{path_pt}')
+
+        # with open(f'{path_pt}', 'rb') as f_new:
+        #     new_G = torch.load(f_new).cuda()
+
+        # print("Exporting large updated pickle based off new generator and ffhq.pkl")
+
+        # with open(path_pkl, 'rb') as f:
+        #     d = pickle.load(f)
+        #     old_G = d['G_ema'].cuda()
+        #     old_D = d['D'].eval().requires_grad_(False).cpu()
+
+        # tmp = {}
+        # tmp['G'] = old_G.eval().requires_grad_(False).cpu()
+        # tmp['G_ema'] = new_G.eval().requires_grad_(False).cpu()
+        # tmp['D'] = old_D
+        # tmp['training_set_kwargs'] = None
+        # tmp['augment_pipe'] = None
+
+
+        # with open(path_pkl, 'wb') as f:
+        #     pickle.dump(tmp, f)
 
         return generated_image, ws
 
@@ -366,7 +479,7 @@ if __name__ == "__main__":
         "curr_point": None,
         "curr_type_point": "start",
         'editing_state': 'add_points',
-        'pretrained_weight': 'stylegan2_horses_256_pytorch'
+        'pretrained_weight': 'stylegan2-ffhq-512x512'
     }
     cache_dir = '/Face_View/DragGAN_CRN/checkpoints'
     valid_checkpoints_dict = {
@@ -385,20 +498,36 @@ if __name__ == "__main__":
         None,  # input_transform
         state['params']['lr']  # lr
     )
-    image = Image.open('/Face_View/DragGAN_CRN/Screenshot 2023-07-21...jpg')
+    image = Image.open('/Face_View/DragGAN_CRN/photo_2023-07-25_16-19-10.jpg')
+    from PIL import ImageOps
+    image_flip = ImageOps.mirror(image)
+
+    image_flip.save("image_flip.png")
+    # exit(1)
+
     G = state['renderer'].G
-    print(state['renderer'].__dict__)
-    exit(1)
+    # model = Generator()
+    # print(state['renderer'].__dict__)
+    # exit(1)
     percept = util.PerceptualLoss(
         model="net-lin", net="vgg", use_gpu=True
     )
-    print(percept)
+    # print(percept)
     # exit(1)
     # result = inverse_image(G, image, percept=percept, image_size=G.img_resolution)
 
 
-    pti = PTI(G, percept, max_pti_step=10)
-    result = pti.train(img = image, w_plus=True, step=10)
+    pti = PTI(G, percept, max_pti_step=500)
+
+    result = pti.train(
+                    image,
+                    image_flip,
+                    state['params']['latent_space'] == 'w+', 
+                    step = 500, 
+                    path_pt = "/Face_View/DragGAN_CRN/checkpoints/custome.pt",
+                    path_latent="/Face_View/DragGAN_CRN/latent/latent.pt",
+                    path_pkl= "/Face_View/DragGAN_CRN/checkpoints/stylegan2-ffhq-512x512.pkl")
+    
     imageio.imsave('test.png', make_image(result[0])[0])
 
 

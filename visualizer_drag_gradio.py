@@ -77,8 +77,8 @@ def init_images(global_state):
         state['generator_params'],  # res
         valid_checkpoints_dict[state['pretrained_weight']],  # pkl
         state['params']['seed'],  # w0_seed,
-        # None,  # w_load
-        torch.load("/Face_View/DragGAN_CRN/PTI/embeddings/image/PTI/latent_vector/0.pt"),
+        None,  # w_load
+        # torch.load("/Face_View/DragGAN_CRN/latent/latent.pt"),
         state['params']['latent_space'] == 'w+',  # w_plus
         'const',
         state['params']['trunc_psi'],  # trunc_psi,
@@ -649,7 +649,8 @@ with gr.Blocks() as app:
                             ]
                             start_temp = global_state["points"][key_point][
                                 "start_temp"]
-                            print(f'    {start_temp}')
+
+                            print(f'{start_temp}')
 
                         image_result = global_state['generator_params']['image']
                         image_draw = update_image_draw(
@@ -776,8 +777,8 @@ with gr.Blocks() as app:
         
 
         def on_click_inverse_custom_image(custom_image, global_state):
-            print('inverse GAN')
 
+            print('inverse GAN')
             if isinstance(global_state, gr.State):
                 state = global_state.value
             else:
@@ -799,14 +800,46 @@ with gr.Blocks() as app:
             percept = util.PerceptualLoss(
                 model="net-lin", net="vgg", use_gpu=True
             )
+            import dlib
+            from PTI.configs import paths_config
+            from PTI.utils.alignment import align_face
+            # image = Image.open(custom_image.name)
+            # image = preprocessing_and_align(custom_image.name, img_size=512)
+            predictor = dlib.shape_predictor(paths_config.dlib)
+            image_ori = align_face(custom_image.name, predictor=predictor, output_size=512)
 
-            image = Image.open(custom_image.name)
+            from PIL import ImageOps
+            image_flip = ImageOps.mirror(image_ori)
 
-            pti = PTI(global_state['renderer'].G, percept, max_pti_step=1000)
 
-            inversed_img, w_pivot = pti.train(image, state['params']['latent_space'] == 'w+', step=400)
-            # print(inversed_img)
-            # print(w_pivot)
+            pti = PTI(global_state['renderer'].G, percept, l2_lambda=1, max_pti_step=500)
+
+            inversed_img, w_pivot = pti.train(
+                                                image_ori,
+                                                image_flip,
+                                                state['params']['latent_space'] == 'w+', 
+                                                step = 500, 
+                                                path_pt = "/Face_View/DragGAN_CRN/checkpoints/custome.pt",
+                                                path_latent="/Face_View/DragGAN_CRN/latent/latent.pt",
+                                                path_pkl= "/Face_View/DragGAN_CRN/checkpoints/stylegan2-ffhq-512x512_custume.pkl")
+            
+
+            # inversed_img_2, w_pivot_2 = pti.train(
+            #                                     image_flip,
+            #                                     state['params']['latent_space'] == 'w+', 
+            #                                     step = 500, 
+            #                                     path_pt = "/Face_View/DragGAN_CRN/checkpoints/custome.pt",
+            #                                     path_latent="/Face_View/DragGAN_CRN/latent/latent.pt",
+            #                                     path_pkl= "/Face_View/DragGAN_CRN/checkpoints/stylegan2-ffhq-512x512_custume.pkl")
+            
+            
+            # inversed_img = (inversed_img_1 + inversed_img_2) / 2
+            # w_pivot = (w_pivot_1 + w_pivot_2) / 2
+
+
+
+            print("[info] inverse: ", inversed_img)
+            print("[info] inverse: ", w_pivot)
 
             inversed_img = (inversed_img[0] * 127.5 + 128).clamp(0, 255).to(torch.uint8).permute(1, 2, 0)
             inversed_img = inversed_img.cpu().numpy()
